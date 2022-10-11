@@ -53,4 +53,45 @@ app.MapPost("/provider", async (MinimalContextDb context, Provider provider) =>
 .WithName("CreateProvider")
 .WithTags("Provider");
 
+app.MapPut("/provider/{id}", async (MinimalContextDb context, Guid id, Provider provider) =>
+{
+    var providerExisting = await context.Providers.AsNoTracking<Provider>()
+                                            .FirstOrDefaultAsync(p => p.Id == id);
+
+    if(providerExisting == null) return Results.NotFound();
+
+    if (!MiniValidator.TryValidate(provider, out var errors))
+        return Results.ValidationProblem(errors);
+
+    context.Providers.Update(provider);
+    var result = await context.SaveChangesAsync();
+
+    return result > 0
+    ? Results.NoContent()
+    : Results.BadRequest("Houve algum problema ao salvar o resgistro");
+})
+.ProducesValidationProblem()
+.Produces<Provider>(StatusCodes.Status204NoContent)
+.Produces<Provider>(StatusCodes.Status400BadRequest)
+.WithName("EditProvider")
+.WithTags("Provider");
+
+app.MapDelete("/provider/{id}", async (MinimalContextDb context, Guid id) =>
+{
+    var providerExisting = await context.Providers.FindAsync(id);
+    if (providerExisting == null) return Results.NotFound();
+
+    context.Providers.Remove(providerExisting);
+    var result = await context.SaveChangesAsync();
+
+    return result > 0
+    ? Results.NoContent()
+    : Results.BadRequest("Houve algum problema ao salvar o resgistro");
+})
+.Produces<Provider>(StatusCodes.Status404NotFound)
+.Produces<Provider>(StatusCodes.Status204NoContent)
+.Produces<Provider>(StatusCodes.Status400BadRequest)
+.WithName("DeleteProvider")
+.WithTags("Provider");
+
 app.Run();
