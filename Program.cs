@@ -25,7 +25,7 @@ app.MapGet("/provider", async (MinimalContextDb context) =>
     .WithName("GetProvider")
     .WithTags("Provider");
 
-app.MapGet("/provider/{id}", async (Guid id, MinimalContextDb context) =>
+app.MapGet("/provider/{id}", async (MinimalContextDb context, Guid id) =>
         await context.Providers.FindAsync(id) is Provider provider 
             ? Results.Ok(provider) 
             : Results.NotFound())
@@ -33,5 +33,15 @@ app.MapGet("/provider/{id}", async (Guid id, MinimalContextDb context) =>
     .Produces<Provider>(StatusCodes.Status404NotFound)
     .WithName("GetProviderById")
     .WithTags("Provider");
+
+app.MapPost("/provider", async (MinimalContextDb context, Provider provider) =>
+{
+    await context.Providers.AddAsync(provider);
+    var result = await context.SaveChangesAsync();
+})
+.Produces<Provider>(StatusCodes.Status201Created)
+.Produces<Provider>(StatusCodes.Status400BadRequest)
+.WithName("CreateProvider")
+.WithTags("Provider");
 
 app.Run();
