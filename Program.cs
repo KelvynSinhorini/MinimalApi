@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using MinimalApi.Data;
 using MinimalApi.Models;
+using MiniValidation;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -36,9 +37,17 @@ app.MapGet("/provider/{id}", async (MinimalContextDb context, Guid id) =>
 
 app.MapPost("/provider", async (MinimalContextDb context, Provider provider) =>
 {
+    if(!MiniValidator.TryValidate(provider, out var errors))
+        return Results.ValidationProblem(errors);
+
     await context.Providers.AddAsync(provider);
     var result = await context.SaveChangesAsync();
+
+    return result > 0 
+    ? Results.Created($"/fornecedor/{provider.Id}", provider)
+    : Results.BadRequest("Houve algum problema ao salvar o resgistro");
 })
+.ProducesValidationProblem()
 .Produces<Provider>(StatusCodes.Status201Created)
 .Produces<Provider>(StatusCodes.Status400BadRequest)
 .WithName("CreateProvider")
