@@ -1,8 +1,13 @@
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using MinimalApi.Data;
 using MinimalApi.Models;
 using MiniValidation;
+using NetDevPack.Identity;
 using NetDevPack.Identity.Jwt;
+using NetDevPack.Identity.Model;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -19,6 +24,12 @@ builder.Services.AddIdentityEntityFrameworkContextConfiguration(options =>
 builder.Services.AddIdentityConfiguration();
 builder.Services.AddJwtConfiguration(builder.Configuration, "AppSettings");
 
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("DeleteProvider",
+        policy => policy.RequireClaim("DeleteProvider"));
+});
+
 var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
@@ -30,7 +41,86 @@ if (app.Environment.IsDevelopment())
 app.UseAuthConfiguration();
 app.UseHttpsRedirection();
 
-app.MapGet("/provider", async (MinimalContextDb context) =>
+app.MapPost("/register", [AllowAnonymous] async (
+    SignInManager<IdentityUser> signInManager, 
+    UserManager<IdentityUser> userManager, 
+    IOptions<AppJwtSettings> appJwtSettings, 
+    RegisterUser registerUser) =>
+{
+    if (registerUser == null)
+        return Results.BadRequest("Usuário não informado!");
+
+    if (!MiniValidator.TryValidate(registerUser, out var errors))
+        return Results.ValidationProblem(errors);
+
+    var user = new IdentityUser
+    {
+        UserName = registerUser.Email,
+        Email = registerUser.Email,
+        EmailConfirmed = true
+    };
+
+    var result = await userManager.CreateAsync(user, registerUser.Password);
+
+    if (!result.Succeeded)
+        return Results.BadRequest(result.Errors);
+
+    var jwt = new JwtBuilder()
+                .WithUserManager(userManager)
+                .WithJwtSettings(appJwtSettings.Value)
+                .WithEmail(user.Email)
+                .WithJwtClaims()
+                .WithUserClaims()
+                .WithUserRoles()
+                .BuildUserResponse();
+
+    return Results.Ok(jwt);
+})
+.ProducesValidationProblem()
+.Produces(StatusCodes.Status200OK)
+.Produces(StatusCodes.Status400BadRequest)
+.WithName("RegisterUser")
+.WithTags("User");
+
+app.MapPost("/login", [AllowAnonymous] async (
+        SignInManager<IdentityUser> signInManager,
+        UserManager<IdentityUser> userManager,
+        IOptions<AppJwtSettings> appJwtSettings,
+        LoginUser loginUser) =>
+{
+    if (loginUser == null)
+        return Results.BadRequest("Usuário não informado");
+
+    if (!MiniValidator.TryValidate(loginUser, out var errors))
+        return Results.ValidationProblem(errors);
+
+    var result = await signInManager.PasswordSignInAsync(loginUser.Email, loginUser.Password, false, true);
+
+    if (result.IsLockedOut)
+        return Results.BadRequest("Usuário bloqueado");
+
+    if (!result.Succeeded)
+        return Results.BadRequest("Usuário ou senha inválidos");
+
+    var jwt = new JwtBuilder()
+                .WithUserManager(userManager)
+                .WithJwtSettings(appJwtSettings.Value)
+                .WithEmail(loginUser.Email)
+                .WithJwtClaims()
+                .WithUserClaims()
+                .WithUserRoles()
+                .BuildUserResponse();
+
+    return Results.Ok(jwt);
+
+})
+.ProducesValidationProblem()
+.Produces(StatusCodes.Status200OK)
+.Produces(StatusCodes.Status400BadRequest)
+.WithName("LoginUser")
+.WithTags("User");
+
+app.MapGet("/provider", [AllowAnonymous] async (MinimalContextDb context) =>
         await context.Providers.ToListAsync())
     .WithName("GetProvider")
     .WithTags("Provider");
@@ -44,7 +134,7 @@ app.MapGet("/provider/{id}", async (MinimalContextDb context, Guid id) =>
     .WithName("GetProviderById")
     .WithTags("Provider");
 
-app.MapPost("/provider", async (MinimalContextDb context, Provider provider) =>
+app.MapPost("/provider", [Authorize] async (MinimalContextDb context, Provider provider) =>
 {
     if(!MiniValidator.TryValidate(provider, out var errors))
         return Results.ValidationProblem(errors);
@@ -62,7 +152,7 @@ app.MapPost("/provider", async (MinimalContextDb context, Provider provider) =>
 .WithName("CreateProvider")
 .WithTags("Provider");
 
-app.MapPut("/provider/{id}", async (MinimalContextDb context, Guid id, Provider provider) =>
+app.MapPut("/provider/{id}", [Authorize] async (MinimalContextDb context, Guid id, Provider provider) =>
 {
     var providerExisting = await context.Providers.AsNoTracking<Provider>()
                                             .FirstOrDefaultAsync(p => p.Id == id);
@@ -85,7 +175,7 @@ app.MapPut("/provider/{id}", async (MinimalContextDb context, Guid id, Provider 
 .WithName("EditProvider")
 .WithTags("Provider");
 
-app.MapDelete("/provider/{id}", async (MinimalContextDb context, Guid id) =>
+app.MapDelete("/provider/{id}", [Authorize] async (MinimalContextDb context, Guid id) =>
 {
     var providerExisting = await context.Providers.FindAsync(id);
     if (providerExisting == null) return Results.NotFound();
@@ -100,6 +190,7 @@ app.MapDelete("/provider/{id}", async (MinimalContextDb context, Guid id) =>
 .Produces<Provider>(StatusCodes.Status404NotFound)
 .Produces<Provider>(StatusCodes.Status204NoContent)
 .Produces<Provider>(StatusCodes.Status400BadRequest)
+.RequireAuthorization("DeleteProvider")
 .WithName("DeleteProvider")
 .WithTags("Provider");
 
